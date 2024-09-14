@@ -3,10 +3,11 @@ import dotenv from 'dotenv';
 import { setupDatabase } from './db/setup';
 import { searchGame } from './utils/gameSearch';
 import { setupMessageListener } from './utils/downloadHandler';
+import { setupFileWatcher } from './utils/fileWatcher'; // Import the file watcher
 
 dotenv.config();
 
-const client = new Client({
+export const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
@@ -24,6 +25,9 @@ const client = new Client({
         const gameName = lastRow ? lastRow.thread_name : '';
         setupMessageListener(client, gameName);
     }
+
+    setupFileWatcher();
+
 });
 
 
@@ -58,9 +62,9 @@ client.on('threadDelete', async (thread) => {
     
     if (threadData) {
         await db.run(`
-            INSERT INTO archived_thread (thread_name, thread_id, link, password)
-            VALUES (?, ?, ?, ?)
-        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password);
+            INSERT INTO archived_thread (thread_name, thread_id, link, password, message_id)
+            VALUES (?, ?, ?, ?, ?)
+        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id);
 
         await db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
         console.log(`Thread ${thread.name} has been archived.`);

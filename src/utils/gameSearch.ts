@@ -109,6 +109,13 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                 }]
             });
 
+            try {
+                await db.run('UPDATE request_thread SET message_id = ? WHERE thread_id = ?', sentMessage.id, thread.id);
+            } catch (error) {
+                console.error('Error updating database:', error);
+            }
+            
+
             // Function to refresh buttons
             async function refreshButtons() {
                 const updatedEmbed = new EmbedBuilder()
@@ -160,21 +167,33 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     await interaction.followUp({ embeds: [dmEmbed], ephemeral: true });
 
                 } else if (interaction.customId === 'start_upload') {
-                    // Start the uploading process and react to the original message
-                    await interaction.followUp({ content: 'Uploading process has started.', ephemeral: true });
+                    // Start the uploading process and update the message
+                    const uploadEmbed = new EmbedBuilder()
+                        .setColor('#ffff00')
+                        .setTitle('Uploading...')
+                        .setDescription('I need your help to Upload it. Please check your DMs...');
+                    await interaction.followUp({ embeds: [uploadEmbed], ephemeral: true });
 
-                    // Fetch the parent message (top message) of the thread
-                    const parentMessage = await thread.fetchStarterMessage(); // For threads, this fetches the original message
-                    // React to the parent message with the uploading emoji
-                    if (parentMessage) {
-                        // Replace with your actual uploading emoji
-                        await parentMessage.react('🔄');
-                    }
+                    // Update the original message to show the uploading status and remove buttons
+                    await sentMessage.edit({
+                        embeds: [new EmbedBuilder()
+                            .setTitle('Uploading...')
+                            .setColor('#ffff00')
+                            .setDescription('Currently Uploading the Game...'),
+                          ],
+                          components: [], // Remove buttons
+                        });
 
-                    console.log(`Game Name: ${bestMatch.title}`);
-                    console.log(`Link: ${bestMatch.link}`);
-                    console.log(`Thread ID: ${thread.id}`);
-                    await downloadHandler(client, bestMatch.link, interaction.user.id);
+                        // Fetch the parent message (top message) of the thread
+                        const parentMessage = await thread.fetchStarterMessage(); // For threads, this fetches the original message
+
+                        // React to the parent message with the uploading emoji
+                        if (parentMessage) {
+                            // Replace with your actual uploading emoji
+                            await parentMessage.react('🔄');
+                        }   
+
+                        await downloadHandler(client, bestMatch.link, interaction.user.id);
 
                 } else if (interaction.customId === 'delete_message') {
                     // Send a confirmation message with a button

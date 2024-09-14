@@ -102,6 +102,12 @@ function searchGame(gameName, thread, client) {
                             components: [dmButton, uploadButton, deleteButton]
                         }]
                 });
+                try {
+                    yield db.run('UPDATE request_thread SET message_id = ? WHERE thread_id = ?', sentMessage.id, thread.id);
+                }
+                catch (error) {
+                    console.error('Error updating database:', error);
+                }
                 // Function to refresh buttons
                 function refreshButtons() {
                     return __awaiter(this, void 0, void 0, function* () {
@@ -148,8 +154,21 @@ function searchGame(gameName, thread, client) {
                         yield interaction.followUp({ embeds: [dmEmbed], ephemeral: true });
                     }
                     else if (interaction.customId === 'start_upload') {
-                        // Start the uploading process and react to the original message
-                        yield interaction.followUp({ content: 'Uploading process has started.', ephemeral: true });
+                        // Start the uploading process and update the message
+                        const uploadEmbed = new discord_js_1.EmbedBuilder()
+                            .setColor('#ffff00')
+                            .setTitle('Uploading...')
+                            .setDescription('I need your help to Upload it. Please check your DMs...');
+                        yield interaction.followUp({ embeds: [uploadEmbed], ephemeral: true });
+                        // Update the original message to show the uploading status and remove buttons
+                        yield sentMessage.edit({
+                            embeds: [new discord_js_1.EmbedBuilder()
+                                    .setTitle('Uploading...')
+                                    .setColor('#ffff00')
+                                    .setDescription('Currently Uploading the Game...'),
+                            ],
+                            components: [], // Remove buttons
+                        });
                         // Fetch the parent message (top message) of the thread
                         const parentMessage = yield thread.fetchStarterMessage(); // For threads, this fetches the original message
                         // React to the parent message with the uploading emoji
@@ -157,9 +176,6 @@ function searchGame(gameName, thread, client) {
                             // Replace with your actual uploading emoji
                             yield parentMessage.react('🔄');
                         }
-                        console.log(`Game Name: ${bestMatch.title}`);
-                        console.log(`Link: ${bestMatch.link}`);
-                        console.log(`Thread ID: ${thread.id}`);
                         yield (0, downloadHandler_1.downloadHandler)(client, bestMatch.link, interaction.user.id);
                     }
                     else if (interaction.customId === 'delete_message') {

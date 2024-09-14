@@ -61,7 +61,7 @@ function downloadHandler(client, gameLink, userId) {
             const embed = new discord_js_1.EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('Please download and send back the .dlc file')
-                .setDescription(`Link: [${googleDriveLink}]\nPassword: ${password}`)
+                .setDescription(`Link: ${googleDriveLink}\nPassword: ${password}`)
                 .setFooter({ text: 'Thanks for your contribution' })
                 .setTimestamp();
             yield user.send({ embeds: [embed] });

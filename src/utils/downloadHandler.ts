@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { setupDatabase } from '../db/setup';
 import axios from 'axios';
-import { Client, ChannelType, GatewayIntentBits, EmbedBuilder } from 'discord.js';
+import { Client, ChannelType, EmbedBuilder } from 'discord.js';
 
 config(); // Load .env variables
 
@@ -50,7 +50,7 @@ export async function downloadHandler(client: Client, gameLink: string, userId: 
         const embed = new EmbedBuilder()
             .setColor(0x00ff00)
             .setTitle('Please download and send back the .dlc file')
-            .setDescription(`Link: [${googleDriveLink}]\nPassword: ${password}`)
+            .setDescription(`Link: ${googleDriveLink}\nPassword: ${password}`)
             .setFooter({ text: 'Thanks for your contribution' })
             .setTimestamp();
         await user.send({ embeds: [embed] });
@@ -82,7 +82,7 @@ export function setupMessageListener(client: Client, gameName: string) {
                 });
 
                 dlcResponse.data.pipe(writer);
-
+                
                 writer.on('finish', () => {
                     console.log('DLC file downloaded successfully.');
                     const embed = new EmbedBuilder()
