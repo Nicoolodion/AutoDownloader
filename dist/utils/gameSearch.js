@@ -16,8 +16,11 @@ exports.searchGame = searchGame;
 const axios_1 = __importDefault(require("axios"));
 const discord_js_1 = require("discord.js");
 const fuse_js_1 = __importDefault(require("fuse.js"));
+const permissions_1 = require("./permissions");
 const downloadHandler_1 = require("./downloadHandler"); // Adjust the path according to your project structure
 const setup_1 = require("../db/setup");
+const dotenv_1 = __importDefault(require("dotenv"));
+dotenv_1.default.config();
 // Function to parse the HTML and extract game titles and links within specific structure
 function parseSearchResults(html) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -121,10 +124,20 @@ function searchGame(gameName, thread, client) {
                     time: 300000 // Collect for 5 minutes
                 });
                 collector.on('collect', (interaction) => __awaiter(this, void 0, void 0, function* () {
+                    var _a, _b, _c;
                     if (!interaction.isButton())
                         return;
                     // Defer the update if needed to avoid interaction timeout
                     yield interaction.deferUpdate();
+                    const userRoles = (_a = interaction.member) === null || _a === void 0 ? void 0 : _a.roles;
+                    const { adminUserId } = require('../data/permissions.json');
+                    if ((!(0, permissions_1.checkPermissions)(userRoles, (_b = process.env.admin) !== null && _b !== void 0 ? _b : '') && !(0, permissions_1.checkPermissions)(userRoles, (_c = process.env.uploader) !== null && _c !== void 0 ? _c : '') && interaction.user.id !== adminUserId)) {
+                        const embed = new discord_js_1.EmbedBuilder()
+                            .setColor('#FF0000')
+                            .setDescription('You don\'t have permission to use this command.');
+                        yield interaction.followUp({ embeds: [embed], ephemeral: true });
+                        return;
+                    }
                     if (interaction.customId === 'send_dm') {
                         // Send an ephemeral message to the same channel
                         const dmEmbed = new discord_js_1.EmbedBuilder()
@@ -150,13 +163,38 @@ function searchGame(gameName, thread, client) {
                         yield (0, downloadHandler_1.downloadHandler)(client, bestMatch.link, interaction.user.id);
                     }
                     else if (interaction.customId === 'delete_message') {
-                        // Delete the message
-                        yield sentMessage.delete();
-                        const deleteEmbed = new discord_js_1.EmbedBuilder()
+                        // Send a confirmation message with a button
+                        const confirmEmbed = new discord_js_1.EmbedBuilder()
                             .setColor('#ff0000')
-                            .setTitle('Message Deleted')
-                            .setDescription('The message has been deleted.');
-                        yield interaction.followUp({ embeds: [deleteEmbed], ephemeral: true });
+                            .setTitle('Confirm Deletion')
+                            .setDescription('Are you sure you want to delete the message?');
+                        const confirmButton = new discord_js_1.ButtonBuilder()
+                            .setCustomId('confirm_delete')
+                            .setLabel('Confirm')
+                            .setStyle(discord_js_1.ButtonStyle.Danger);
+                        const row = {
+                            type: discord_js_1.ComponentType.ActionRow,
+                            components: [confirmButton],
+                        };
+                        const confirmMessage = yield interaction.followUp({ embeds: [confirmEmbed], components: [row], ephemeral: true });
+                        // Collect button interactions
+                        const confirmCollector = interaction.channel.createMessageComponentCollector({
+                            componentType: discord_js_1.ComponentType.Button,
+                            time: 10000,
+                        });
+                        confirmCollector.on('collect', (i) => __awaiter(this, void 0, void 0, function* () {
+                            if (i.customId === 'confirm_delete') {
+                                // Delete the message
+                                yield sentMessage.delete();
+                                const deleteEmbed = new discord_js_1.EmbedBuilder()
+                                    .setColor('#ff0000')
+                                    .setTitle('Message Deleted')
+                                    .setDescription('The message has been deleted.');
+                                // Send a follow-up message to the interaction
+                                yield i.editReply({ embeds: [deleteEmbed], components: [] });
+                                confirmCollector.stop();
+                            }
+                        }));
                     }
                 }));
                 collector.on('end', (collected, reason) => {

@@ -1,11 +1,14 @@
 import axios from 'axios';
-import { ThreadChannel, EmbedBuilder, ButtonBuilder, ButtonStyle, ComponentType, Client } from 'discord.js';
+import { ThreadChannel, EmbedBuilder, ButtonBuilder, ButtonStyle, ComponentType, Client, DMChannel, GuildTextBasedChannel } from 'discord.js';
 import Fuse from 'fuse.js';
 import { checkPermissions } from './permissions';
 import { downloadHandler } from './downloadHandler'; // Adjust the path according to your project structure
 import { setupDatabase } from '../db/setup';
+import dotenv from 'dotenv';
 
+dotenv.config();
 interface GameResult {
+
     title: string;
     link: string;
 }
@@ -135,6 +138,17 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                 // Defer the update if needed to avoid interaction timeout
                 await interaction.deferUpdate();
 
+                const userRoles = interaction.member?.roles as any;
+                const { adminUserId } = require('../data/permissions.json');
+        
+                if ((!checkPermissions(userRoles, process.env.admin ?? '') && !checkPermissions(userRoles, process.env.uploader ?? '') && interaction.user.id !== adminUserId)) {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setDescription('You don\'t have permission to use this command.');
+                    await interaction.followUp({ embeds: [embed], ephemeral: true });
+                    return;
+                }
+
                 if (interaction.customId === 'send_dm') {
                     // Send an ephemeral message to the same channel
                     const dmEmbed = new EmbedBuilder()
@@ -163,13 +177,42 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     await downloadHandler(client, bestMatch.link, interaction.user.id);
 
                 } else if (interaction.customId === 'delete_message') {
-                    // Delete the message
-                    await sentMessage.delete();
-                    const deleteEmbed = new EmbedBuilder()
+                    // Send a confirmation message with a button
+                    const confirmEmbed = new EmbedBuilder()
                         .setColor('#ff0000')
-                        .setTitle('Message Deleted')
-                        .setDescription('The message has been deleted.');
-                    await interaction.followUp({ embeds: [deleteEmbed], ephemeral: true });
+                        .setTitle('Confirm Deletion')
+                        .setDescription('Are you sure you want to delete the message?');
+                    const confirmButton = new ButtonBuilder()
+                        .setCustomId('confirm_delete')
+                        .setLabel('Confirm')
+                    .setStyle(ButtonStyle.Danger)
+                    const row = {
+                        type: ComponentType.ActionRow,
+                        components: [confirmButton], 
+                    };
+                    const confirmMessage = await interaction.followUp({ embeds: [confirmEmbed], components: [row], ephemeral: true });
+
+                    // Collect button interactions
+                    const confirmCollector = (interaction.channel as GuildTextBasedChannel | DMChannel).createMessageComponentCollector({
+                        componentType: ComponentType.Button,
+                        time: 10000,
+                    });
+
+                    confirmCollector.on('collect', async (i) => {
+                        if (i.customId === 'confirm_delete') {
+                            // Delete the message
+                            await sentMessage.delete();
+                            const deleteEmbed = new EmbedBuilder()
+                                .setColor('#ff0000')
+                                .setTitle('Message Deleted')
+                                .setDescription('The message has been deleted.');
+                    
+                            // Send a follow-up message to the interaction
+                            await i.editReply({ embeds: [deleteEmbed], components: [] }); 
+                            confirmCollector.stop();
+                        }
+                    });
+                    
                 }
             });
 
