@@ -28,7 +28,10 @@ function setupDatabase() {
             thread_id TEXT UNIQUE,
             link TEXT,
             password TEXT CHECK(LENGTH(password) = 3),
-            message_id TEXT
+            rar_name TEXT,
+            message_id TEXT,
+            user_id TEXT
+
         )
     `);
         yield db.exec(`
@@ -39,6 +42,8 @@ function setupDatabase() {
             link TEXT,
             password TEXT CHECK(LENGTH(password) = 3),
             message_id TEXT,
+            rar_name TEXT,
+            user_id TEXT,
             deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `);

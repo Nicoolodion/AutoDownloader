@@ -156,11 +156,17 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
             });
 
             try {
-                await db.run('UPDATE request_thread SET message_id = ? WHERE thread_id = ?', sentMessage.id, thread.id);
+                const threadMembers = await (await thread.fetch()).members.fetch();
+                const threadCreator = threadMembers.first();
+                if (threadCreator) {
+                    await db.run('UPDATE request_thread SET message_id = ?, user_id = ? WHERE thread_id = ?', sentMessage.id, threadCreator.id, thread.id);
+                } else {
+                    console.error('No thread creator found');
+                }
             } catch (error) {
                 console.error('Error updating database:', error);
             }
-
+            
             // Function to refresh buttons
             async function refreshButtons() {
                 //const refreshedMessage = await sentMessage.edit({

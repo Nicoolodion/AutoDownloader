@@ -41,7 +41,6 @@ exports.client.once('ready', () => __awaiter(void 0, void 0, void 0, function* (
     (0, fileWatcher_1.setupFileWatcher)();
 }));
 const checkForNewThreads = (thread) => __awaiter(void 0, void 0, void 0, function* () {
-    // TODO Add tag selection and only choose games tag
     const excludedTags = ['MP', 'Multiplayer', 'weitere Nachricht', 'DLC Unlocker', 'Unlocker'];
     if (excludedTags.some(tag => thread.name.includes(tag))) {
         console.log('Multiplayer request detected, skipping...');
@@ -54,7 +53,6 @@ const checkForNewThreads = (thread) => __awaiter(void 0, void 0, void 0, functio
     }
     // Check if the thread has the required tag
     if (!thread.appliedTags.includes(requiredTagId)) {
-        console.log('Required tag not found, skipping thread.');
         return;
     }
     const db = yield (0, setup_1.setupDatabase)();
@@ -76,9 +74,10 @@ exports.client.on('threadDelete', (thread) => __awaiter(void 0, void 0, void 0, 
     const threadData = yield db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
     if (threadData) {
         yield db.run(`
-            INSERT INTO archived_thread (thread_name, thread_id, link, password, message_id)
-            VALUES (?, ?, ?, ?, ?)
-        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id);
+            INSERT INTO archived_thread (
+                thread_name, thread_id, link, password, message_id, rar_name, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id, threadData.rar_name, threadData.user_id);
         yield db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
     }
 }));

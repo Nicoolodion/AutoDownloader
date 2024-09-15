@@ -77,9 +77,10 @@ client.on('threadDelete', async (thread) => {
     
     if (threadData) {
         await db.run(`
-            INSERT INTO archived_thread (thread_name, thread_id, link, password, message_id)
-            VALUES (?, ?, ?, ?, ?)
-        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id);
+            INSERT INTO archived_thread (
+                thread_name, thread_id, link, password, message_id, rar_name, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id, threadData.rar_name, threadData.user_id);
 
         await db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
     }

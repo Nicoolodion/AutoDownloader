@@ -5,7 +5,8 @@ import { exec } from 'child_process';
 import dotenv from 'dotenv';
 import { setupDatabase } from '../db/setup';
 import { client } from '../bot';
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, TextChannel } from 'discord.js';
+
 dotenv.config();
 
 const WORKING_DOWNLOADS = 'C:\\Users\\niki1\\OneDrive - HTL Wels\\projects\\PirateBot\\download_working';
@@ -13,139 +14,268 @@ const UPLOADING_DRIVE = process.env.UPLOADING_DRIVE || '';
 const CG_ADWARE = process.env.CG_ADWARE || '';
 const WINRAR_PATH = 'C:\\Program Files\\WinRAR\\WinRAR.exe'; // Set this to the full path of your WinRAR installation
 
+// Debounce settings
+const DEBOUNCE_DELAY = 10000; // 5 seconds delay to wait after the last change
+
+// Map to track the last modification time for each directory
+const lastModificationTimes = new Map<string, number>();
+
+// Set to track processed directories
+const processedDirectories = new Set<string>();
+
 export function setupFileWatcher() {
     const watcher = chokidar.watch(WORKING_DOWNLOADS, { persistent: true, ignoreInitial: true, depth: 1 });
 
-    watcher.on('addDir', async (dirPath) => {
+    watcher.on('all', async (event, dirPath) => {
+        if (event === 'addDir' || event === 'unlinkDir') {
+            const now = Date.now();
+            lastModificationTimes.set(dirPath, now);
+
+            // Schedule processing after the debounce delay
+            setTimeout(async () => {
+                if (lastModificationTimes.get(dirPath) === now) {
+                    await processDirectory(dirPath);
+                }
+            }, DEBOUNCE_DELAY);
+        }
+    });
+}
+
+async function processDirectory(dirPath: string) {
+    // Check if the directory has already been processed
+    if (processedDirectories.has(dirPath)) {
+        console.log(`Directory ${dirPath} has already been processed.`);
+        return;
+    }
+
+    try {
+        if (!dirPath.startsWith(WORKING_DOWNLOADS)) return;
+
+        // Check if the directory still exists
         try {
-            // Ensure we're only processing directories within WORKING_DOWNLOADS
-            if (!dirPath.startsWith(WORKING_DOWNLOADS)) return;
+            await fs.access(dirPath);
+        } catch {
+            console.log(`Directory ${dirPath} does not exist.`);
+            return;
+        }
 
-            const folderName = path.basename(dirPath).replace(/\./g, ' '); // Replace dots with underscores
-            if (folderName === '.git') return;
+        const folderName = path.basename(dirPath);
+        if (folderName === '.git') return;
 
-            const files = await fs.readdir(dirPath);
-            const isoFiles = files.filter(file => file.endsWith('.iso'));
+        const files = await fs.readdir(dirPath);
 
-            if (isoFiles.length > 0) {
-                for (const isoFile of isoFiles) {
-                    const isoPath = path.join(dirPath, isoFile);
-                    const newIsoPath = path.join(dirPath, `${folderName}.iso`);
-                    await fs.rename(isoPath, newIsoPath);
+        // Check if the folder is empty
+        if (files.length === 0) {
+            console.log(`Directory ${dirPath} is empty. Skipping.`);
+            return; // Skip empty directories
+        }
 
-                    await fs.rename(newIsoPath, path.join(UPLOADING_DRIVE, `${folderName}.iso`));
+        console.log(files);
+
+        const partFiles = files.filter(file => file.endsWith('.part'));
+        if (partFiles.length > 0) {
+            setTimeout(async () => {
+                await processDirectory(dirPath);
+            }, 30000);
+            return;
+        }
+
+        const partFiles2 = files.filter(file => file.endsWith('.rar'));
+        if (partFiles2.length > 0) {
+            setTimeout(async () => {
+                await processDirectory(dirPath);
+            }, 250000);
+            return;
+        }
+
+        const isoFiles = files.filter(file => file.endsWith('.iso'));
+        if (isoFiles.length > 0) {
+            for (const isoFile of isoFiles) {
+                const isoPath = path.join(dirPath, isoFile);
+                const newIsoPath = path.join(dirPath, `${folderName}.iso`);
+                await fs.rename(isoPath, newIsoPath);
+                await fs.rename(newIsoPath, path.join(UPLOADING_DRIVE, `${folderName}.iso`));
+
+                await new Promise(resolve => setTimeout(resolve, 7000));
+                const db = await setupDatabase();
+                const row = await db.get('SELECT id FROM request_thread WHERE thread_id = (SELECT thread_id FROM request_thread ORDER BY id DESC LIMIT 1)');
+                if (row) {
+                    await db.run('UPDATE request_thread SET rar_name = ? WHERE id = ?', folderName, row.id);
+                } else {
+                    console.error('No thread found with the latest id');
                 }
-            } else if (files.length > 0) {
-                const wwwFile = files.find(file => file.toUpperCase() === 'WWW.OVAGAMES.COM');
-                const readmeFile = files.find(file => file.toUpperCase() === 'README.TXT');
 
-                if (wwwFile) {
-                    await fs.unlink(path.join(dirPath, wwwFile));
-                }
+            try {
+                await deleteDirectoryWithRetry(dirPath);
+                processedDirectories.add(dirPath);
 
-                if (readmeFile) {
-                    await fs.unlink(path.join(dirPath, readmeFile));
-                }
+                const row = await db.get('SELECT * FROM request_thread WHERE rar_name = ?', folderName);
+                if (row) {
+                    const channel = await client.channels.fetch(row.thread_id);
+                    if (channel && channel.isTextBased()) {
+                        const message = await channel.messages.fetch(row.message_id);
+                        if (message) {
+                            if (channel.isThread()) {
+                                const parentMessage = await channel.fetchStarterMessage(); // For threads, this fetches the original message
+                                // React to the parent message with the uploading emoji
+                                if (parentMessage) {
+                                    // Replace with your actual uploading emoji
+                                    await parentMessage.reactions.removeAll();
+                                    await parentMessage.react('✅');
+                                }
+                            }
 
-                // Check if CG_ADWARE exists and is readable
-                try {
-                    const adwareFiles = await fs.readdir(CG_ADWARE);
-                    if (adwareFiles.length === 0) {
-                        console.log(`No files found in CG_ADWARE`);
-                    }
-                    
-                    for (const adwareFile of adwareFiles) {
-                        const adwareFilePath = path.join(CG_ADWARE, adwareFile);
-                        const destinationPath = path.join(path.dirname(dirPath), adwareFile); // Move to parent folder
-                        await fs.copyFile(adwareFilePath, destinationPath);
-                    }
-                } catch (error) {
-                    console.error(`Error reading or moving files from CG_ADWARE: ${error}`);
-                }
-
-                // Use the full path to WinRAR
-                const rarFilePath = path.join(UPLOADING_DRIVE, `${folderName}.rar`);
-                const rarCommand = `"${WINRAR_PATH}" a -ep1 -r -m1 -ibck "${rarFilePath}" "${path.dirname(dirPath)}\\*"`;
-
-                exec(rarCommand, async (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`Error creating RAR: ${stderr}`);
-
-                        try {
-                            await fs.rmdir(dirPath, { recursive: true });
-                            console.log("1");
-                            // Fetch message_id from database
-                            const db = await setupDatabase();
-                            const row = await db.get('SELECT * FROM request_thread WHERE thread_name = ?', folderName);
-                            console.log("2" + row);
+                            const row = await db.get('SELECT user_id FROM request_thread WHERE thread_id = ?', channel.id);
                             if (row) {
-                                console.log("3");
-                                const channel = await client.channels.fetch(row.thread_id);
-                                console.log("4" + channel);
-                                if (channel && channel.isTextBased()) {
-                                    const message = await channel.messages.fetch(row.message_id);
-                                    console.log("5" + message);
-                                    if (message) {
-                                        console.log("6");
-                                        await message.reactions.removeAll(); // Remove old reactions
-                                        await message.react('✅'); // React with "done" emoji
+                                const user = await client.users.fetch(row.user_id);
+                                if (user) {
+                                    await message.edit({
+                                        embeds: [new EmbedBuilder()
+                                            .setDescription(`${message.content}\n\n**Uploaded!**\n${user} your game has been uploaded and is now available for download.`)
+                                            .setColor('#00FF00') // Green
+                                            .setTimestamp()]
+                                    });
+                                    if (message.channel.isTextBased()) {
+                                        const textChannel = message.channel as TextChannel;
+                                        const pingMessage = await textChannel.send(`<@${row.user_id}>`);
+                                        setTimeout(async () => {
+                                          await pingMessage.delete();
+                                        }, 10);
+                                      }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (deleteError) {
+                console.error(`Error deleting directory ${dirPath}:`, deleteError);
+            }
+            try {
+                await deleteDirectoryWithRetry(dirPath);
+                processedDirectories.add(dirPath);
+                console.log(`Directory ${dirPath} processed and cleaned up.`);
+            } catch (deleteError) {
+                console.error(`Error deleting directory ${dirPath}:`, deleteError);
+            }
+    
+
+
+            }
+        } else if (files.length > 0) {
+            const wwwFile = files.find(file => file.toUpperCase() === 'WWW.OVAGAMES.COM' || file.toUpperCase() === 'WWW.OVAGAMES.COM.URL');
+            const readmeFile = files.find(file => file.toUpperCase() === 'README.TXT');
+
+            if (wwwFile) {
+                await fs.unlink(path.join(dirPath, wwwFile));
+            }
+
+            if (readmeFile) {
+                await fs.unlink(path.join(dirPath, readmeFile));
+            }
+
+            try {
+                const adwareFiles = await fs.readdir(CG_ADWARE);
+                if (adwareFiles.length === 0) {
+                    console.log(`No files found in CG_ADWARE`);
+                }
+
+                for (const adwareFile of adwareFiles) {
+                    const adwareFilePath = path.join(CG_ADWARE, adwareFile);
+                    const destinationPath = path.join(path.dirname(dirPath), adwareFile);
+                    await fs.copyFile(adwareFilePath, destinationPath);
+                }
+            } catch (error) {
+                console.error(`Error reading or moving files from CG_ADWARE: ${error}`);
+            }
+            const rarFilePath = path.join(UPLOADING_DRIVE, `${folderName}.rar`);
+            const rarCommand = `"${WINRAR_PATH}" a -ep1 -r -m1 -ibck "${rarFilePath}" "${path.dirname(dirPath)}\\*"`;
+            // TODO: PRODUCTION
+            await new Promise(resolve => setTimeout(resolve, 7000));
+            const db = await setupDatabase();
+            const row = await db.get('SELECT id FROM request_thread WHERE thread_id = (SELECT thread_id FROM request_thread ORDER BY id DESC LIMIT 1)');
+            if (row) {
+                await db.run('UPDATE request_thread SET rar_name = ? WHERE id = ?', folderName, row.id);
+            } else {
+                console.error('No thread found with the latest id');
+            }
+
+            exec(rarCommand, async (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error creating RAR: ${stderr}`);
+                } else {
+                    console.log(`RAR created successfully: ${stdout}`);
+                }
+
+                try {
+                    await deleteDirectoryWithRetry(dirPath);
+                    processedDirectories.add(dirPath);
+
+                    const row = await db.get('SELECT * FROM request_thread WHERE rar_name = ?', folderName);
+                    if (row) {
+                        const channel = await client.channels.fetch(row.thread_id);
+                        if (channel && channel.isTextBased()) {
+                            const message = await channel.messages.fetch(row.message_id);
+                            if (message) {
+                                if (channel.isThread()) {
+                                    const parentMessage = await channel.fetchStarterMessage(); // For threads, this fetches the original message
+                                    // React to the parent message with the uploading emoji
+                                    if (parentMessage) {
+                                        // Replace with your actual uploading emoji
+                                        await parentMessage.reactions.removeAll();
+                                        await parentMessage.react('✅');
+                                    }
+                                }
+
+                                const row = await db.get('SELECT user_id FROM request_thread WHERE thread_id = ?', channel.id);
+                                if (row) {
+                                    const user = await client.users.fetch(row.user_id);
+                                    if (user) {
                                         await message.edit({
                                             embeds: [new EmbedBuilder()
-                                                .setDescription(`${message.content}\n\n**Uploaded!**\nYour game has been uploaded and is now available for download.`)
+                                                .setDescription(`${message.content}\n\n**Uploaded!**\n${user} your game has been uploaded and is now available for download.`)
                                                 .setColor('#00FF00') // Green
                                                 .setTimestamp()]
                                         });
-                                        console.log("7");
+                                        if (message.channel.isTextBased()) {
+                                            const textChannel = message.channel as TextChannel;
+                                            const pingMessage = await textChannel.send(`<@${row.user_id}>`);
+                                            setTimeout(async () => {
+                                              await pingMessage.delete();
+                                            }, 10);
+                                          }
                                     }
                                 }
                             }
-
-                        } catch (deleteError) {
-                            console.error(`Error deleting directory ${dirPath}:`, deleteError);
-                        }
-                        
-                    } else {
-                        console.log(`RAR created successfully: ${stdout}`);
-                        try {
-                            await fs.rmdir(dirPath, { recursive: true });
-                            console.log("1");
-                            // Fetch message_id from database
-                            const db = await setupDatabase();
-                            const row = await db.get('SELECT * FROM request_thread WHERE thread_name = ?', folderName);
-                            
-                            if (!row) {
-                                console.log(`No data found for thread_name: ${folderName}`);
-                                return;
-                            }
-
-                            console.log("2" + row);
-                            const channel = await client.channels.fetch(row.thread_id);
-                            console.log("3" + channel);
-                            if (channel && channel.isTextBased()) {
-                                console.log("3" + channel);
-                                const message = await channel.messages.fetch(row.message_id);
-                                if (message) {
-                                    console.log("4" + message);
-                                    await message.reactions.removeAll(); // Remove old reactions
-                                    await message.react('✅'); // React with "done" emoji
-                                    await message.edit({
-                                        embeds: [new EmbedBuilder()
-                                            .setDescription(`${message.content}\n\n**Uploaded!**\nYour game has been uploaded and is now available for download.`)
-                                            .setColor('#00FF00') // Green
-                                            .setTimestamp()
-                                        ]
-                                    });
-                                }
-                            }
-
-                        } catch (deleteError) {
-                            console.error(`Error deleting directory ${dirPath}:`, deleteError);
                         }
                     }
-                });
-            }
-        } catch (error) {
-            console.error(`Error processing folder ${dirPath}:`, error);
+                } catch (deleteError) {
+                    console.error(`Error deleting directory ${dirPath}:`, deleteError);
+                }
+                try {
+                    await deleteDirectoryWithRetry(dirPath);
+                    processedDirectories.add(dirPath);
+                    console.log(`Directory ${dirPath} processed and cleaned up.`);
+                } catch (deleteError) {
+                    console.error(`Error deleting directory ${dirPath}:`, deleteError);
+                }
+            });
         }
-    });
+    } catch (error) {
+        console.error(`Error processing folder ${dirPath}:`, error);
+    }
+}
+
+async function deleteDirectoryWithRetry(dirPath: string) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+            await new Promise((resolve) => setTimeout(resolve, 60000));
+            await fs.rm(dirPath, { recursive: true, force: true });
+            console.log(`Directory deleted: ${dirPath}`);
+            processedDirectories.delete(dirPath);
+            break;
+        } catch (error) {
+            const typedError = error as NodeJS.ErrnoException;
+            // Rest of the code
+        }
+    }
 }

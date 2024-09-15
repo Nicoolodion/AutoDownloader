@@ -137,7 +137,14 @@ function searchGame(gameName, thread, client) {
                         }]
                 });
                 try {
-                    yield db.run('UPDATE request_thread SET message_id = ? WHERE thread_id = ?', sentMessage.id, thread.id);
+                    const threadMembers = yield (yield thread.fetch()).members.fetch();
+                    const threadCreator = threadMembers.first();
+                    if (threadCreator) {
+                        yield db.run('UPDATE request_thread SET message_id = ?, user_id = ? WHERE thread_id = ?', sentMessage.id, threadCreator.id, thread.id);
+                    }
+                    else {
+                        console.error('No thread creator found');
+                    }
                 }
                 catch (error) {
                     console.error('Error updating database:', error);
