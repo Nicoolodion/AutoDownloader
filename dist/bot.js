@@ -42,15 +42,26 @@ exports.client.once('ready', () => __awaiter(void 0, void 0, void 0, function* (
 }));
 const checkForNewThreads = (thread) => __awaiter(void 0, void 0, void 0, function* () {
     // TODO Add tag selection and only choose games tag
-    if (thread.name.includes('MP') || thread.name.includes('Multiplayer')) {
+    const excludedTags = ['MP', 'Multiplayer', 'weitere Nachricht', 'DLC Unlocker', 'Unlocker'];
+    if (excludedTags.some(tag => thread.name.includes(tag))) {
         console.log('Multiplayer request detected, skipping...');
+        return;
+    }
+    const requiredTagId = process.env.GAMES_TAG;
+    if (!requiredTagId) {
+        console.error('REQUIRED_TAG_ID is not defined in the environment variables.');
+        return;
+    }
+    // Check if the thread has the required tag
+    if (!thread.appliedTags.includes(requiredTagId)) {
+        console.log('Required tag not found, skipping thread.');
         return;
     }
     const db = yield (0, setup_1.setupDatabase)();
     const existingThread = yield db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
     if (!existingThread) {
+        const tags = thread.appliedTags;
         yield db.run('INSERT INTO request_thread (thread_name, thread_id) VALUES (?, ?)', thread.name, thread.id);
-        console.log(`Thread ${thread.name} has been saved.`);
         yield (0, gameSearch_1.searchGame)(thread.name, thread, exports.client);
     }
 });
@@ -69,7 +80,6 @@ exports.client.on('threadDelete', (thread) => __awaiter(void 0, void 0, void 0, 
             VALUES (?, ?, ?, ?, ?)
         `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id);
         yield db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
-        console.log(`Thread ${thread.name} has been archived.`);
     }
 }));
 exports.client.login(process.env.DISCORD_TOKEN);

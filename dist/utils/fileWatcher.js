@@ -20,6 +20,7 @@ const child_process_1 = require("child_process");
 const dotenv_1 = __importDefault(require("dotenv"));
 const setup_1 = require("../db/setup");
 const bot_1 = require("../bot");
+const discord_js_1 = require("discord.js");
 dotenv_1.default.config();
 const WORKING_DOWNLOADS = 'C:\\Users\\niki1\\OneDrive - HTL Wels\\projects\\PirateBot\\download_working';
 const UPLOADING_DRIVE = process.env.UPLOADING_DRIVE || '';
@@ -32,7 +33,7 @@ function setupFileWatcher() {
             // Ensure we're only processing directories within WORKING_DOWNLOADS
             if (!dirPath.startsWith(WORKING_DOWNLOADS))
                 return;
-            const folderName = path_1.default.basename(dirPath);
+            const folderName = path_1.default.basename(dirPath).replace(/\./g, ' '); // Replace dots with underscores
             if (folderName === '.git')
                 return;
             const files = yield promises_1.default.readdir(dirPath);
@@ -75,21 +76,68 @@ function setupFileWatcher() {
                 (0, child_process_1.exec)(rarCommand, (error, stdout, stderr) => __awaiter(this, void 0, void 0, function* () {
                     if (error) {
                         console.error(`Error creating RAR: ${stderr}`);
-                    }
-                    else {
                         try {
                             yield promises_1.default.rmdir(dirPath, { recursive: true });
+                            console.log("1");
                             // Fetch message_id from database
                             const db = yield (0, setup_1.setupDatabase)();
                             const row = yield db.get('SELECT * FROM request_thread WHERE thread_name = ?', folderName);
+                            console.log("2" + row);
                             if (row) {
+                                console.log("3");
                                 const channel = yield bot_1.client.channels.fetch(row.thread_id);
+                                console.log("4" + channel);
                                 if (channel && channel.isTextBased()) {
                                     const message = yield channel.messages.fetch(row.message_id);
+                                    console.log("5" + message);
                                     if (message) {
+                                        console.log("6");
                                         yield message.reactions.removeAll(); // Remove old reactions
                                         yield message.react('✅'); // React with "done" emoji
+                                        yield message.edit({
+                                            embeds: [new discord_js_1.EmbedBuilder()
+                                                    .setDescription(`${message.content}\n\n**Uploaded!**\nYour game has been uploaded and is now available for download.`)
+                                                    .setColor('#00FF00') // Green
+                                                    .setTimestamp()]
+                                        });
+                                        console.log("7");
                                     }
+                                }
+                            }
+                        }
+                        catch (deleteError) {
+                            console.error(`Error deleting directory ${dirPath}:`, deleteError);
+                        }
+                    }
+                    else {
+                        console.log(`RAR created successfully: ${stdout}`);
+                        try {
+                            yield promises_1.default.rmdir(dirPath, { recursive: true });
+                            console.log("1");
+                            // Fetch message_id from database
+                            const db = yield (0, setup_1.setupDatabase)();
+                            const row = yield db.get('SELECT * FROM request_thread WHERE thread_name = ?', folderName);
+                            if (!row) {
+                                console.log(`No data found for thread_name: ${folderName}`);
+                                return;
+                            }
+                            console.log("2" + row);
+                            const channel = yield bot_1.client.channels.fetch(row.thread_id);
+                            console.log("3" + channel);
+                            if (channel && channel.isTextBased()) {
+                                console.log("3" + channel);
+                                const message = yield channel.messages.fetch(row.message_id);
+                                if (message) {
+                                    console.log("4" + message);
+                                    yield message.reactions.removeAll(); // Remove old reactions
+                                    yield message.react('✅'); // React with "done" emoji
+                                    yield message.edit({
+                                        embeds: [new discord_js_1.EmbedBuilder()
+                                                .setDescription(`${message.content}\n\n**Uploaded!**\nYour game has been uploaded and is now available for download.`)
+                                                .setColor('#00FF00') // Green
+                                                .setTimestamp()
+                                        ]
+                                    });
                                 }
                             }
                         }

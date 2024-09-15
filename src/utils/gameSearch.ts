@@ -8,10 +8,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 interface GameResult {
-
     title: string;
     link: string;
 }
+
+
 
 // Function to parse the HTML and extract game titles and links within specific structure
 async function parseSearchResults(html: string): Promise<GameResult[]> {
@@ -27,12 +28,55 @@ async function parseSearchResults(html: string): Promise<GameResult[]> {
 
     while ((match = regex.exec(html)) !== null) {
         const link = match[1].trim();
-        const title = match[2].trim().replace(/ - .+$/, ''); // Remove any extra description after the main title
-        gameResults.push({ title, link });
+        const title = match[2].trim().replace(/ - .+$/, '')
+        gameResults.push({ title, link});
     }
 
     return gameResults;
 }
+
+async function fetchGameDate(gameLink: string): Promise<{ date: string | null}> {
+    try {
+
+        const response = await axios.get(gameLink, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+            },
+        });
+
+        // Extract the date from the JSON-like response data
+        const dateMatch = response.data.match(/"dateModified":"([^"]+)"/);
+        const dateString = dateMatch ? dateMatch[1].trim() : null;
+
+        let formattedDate: string | null = null;
+        if (dateString) {
+            // Parse the date string to a Date object
+            const date = new Date(dateString);
+
+            // Format the date as "dd-mm-yyyy"
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are zero-based
+            const year = date.getFullYear();
+
+            formattedDate = `${day}-${month}-${year}`;
+        }
+
+        if (!formattedDate) {
+            console.error('Date not found on the page.');
+            return { date: null};
+        }
+
+        return { date: formattedDate };
+    } catch (error) {
+        console.error(`Error fetching game date from ${gameLink}:`, error);
+        return { date: null};
+    }
+}
+
+
+
+
+
 
 export async function searchGame(gameName: string, thread: ThreadChannel, client: Client) {
     const searchUrl = `https://www.ovagames.com/?s=${encodeURIComponent(gameName)}&x=0&y=0`;
@@ -80,6 +124,8 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
 
         if (result.length > 0) {
             const bestMatch = result[0].item;
+            const gameDate = await fetchGameDate(bestMatch.link);
+            
 
             // Create embed with game details and buttons
             const embed = new EmbedBuilder()
@@ -114,24 +160,22 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
             } catch (error) {
                 console.error('Error updating database:', error);
             }
-            
 
             // Function to refresh buttons
             async function refreshButtons() {
-                const updatedEmbed = new EmbedBuilder()
-                    .setTitle('Found a possible match!')
-                    .setColor('#0099ff');
+                //const refreshedMessage = await sentMessage.edit({
+                //    components: [{
+                //        type: ComponentType.ActionRow,
+                //        components: [dmButton, uploadButton, deleteButton]
+                //    }]
+                //});
                 
-                const refreshedMessage = await sentMessage.edit({
-                    embeds: [updatedEmbed],
-                    components: [{
-                        type: ComponentType.ActionRow,
-                        components: [dmButton, uploadButton, deleteButton]
-                    }]
-                });
-                
-                sentMessage = refreshedMessage; // Update sentMessage reference
+                //sentMessage = refreshedMessage; // Update sentMessage reference
             }
+
+            // Set up periodic button refreshing
+            const refreshInterval = 300000; // Refresh every 5 minutes
+            const intervalId = setInterval(refreshButtons, refreshInterval);
 
             // Create a collector for interactions with buttons
             const collector = thread.createMessageComponentCollector({
@@ -161,7 +205,7 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     const dmEmbed = new EmbedBuilder()
                         .setColor('#00FF00')
                         .setTitle('Game Details')
-                        .setDescription(`Game Name: ${bestMatch.title}\nLink: ${bestMatch.link}`);
+                        .setDescription(`Game Name: ${bestMatch.title}\nLink: ${bestMatch.link}\nDate: ${gameDate.date}`);
                     
                     // Respond to interaction with ephemeral message
                     await interaction.followUp({ embeds: [dmEmbed], ephemeral: true });
@@ -170,7 +214,7 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     // Start the uploading process and update the message
                     const uploadEmbed = new EmbedBuilder()
                         .setColor('#ffff00')
-                        .setTitle('Uploading...')
+                        .setTitle('Starting Upload...')
                         .setDescription('I need your help to Upload it. Please check your DMs...');
                     await interaction.followUp({ embeds: [uploadEmbed], ephemeral: true });
 
@@ -204,7 +248,7 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     const confirmButton = new ButtonBuilder()
                         .setCustomId('confirm_delete')
                         .setLabel('Confirm')
-                    .setStyle(ButtonStyle.Danger)
+                        .setStyle(ButtonStyle.Danger)
                     const row = {
                         type: ComponentType.ActionRow,
                         components: [confirmButton], 
@@ -241,13 +285,13 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     // Refresh buttons to keep them active
                     refreshButtons();
                 }
+                clearInterval(intervalId); // Stop refreshing when collector ends
             });
 
         } else {
-            await thread.send(':x: No matching game found.');
+            
         }
     } catch (error) {
         console.error('Error searching for game:', error);
-        await thread.send(':x: An error occurred while searching.');
     }
 }

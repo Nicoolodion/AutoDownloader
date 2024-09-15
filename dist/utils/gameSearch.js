@@ -33,10 +33,43 @@ function parseSearchResults(html) {
         let match;
         while ((match = regex.exec(html)) !== null) {
             const link = match[1].trim();
-            const title = match[2].trim().replace(/ - .+$/, ''); // Remove any extra description after the main title
+            const title = match[2].trim().replace(/ - .+$/, '');
             gameResults.push({ title, link });
         }
         return gameResults;
+    });
+}
+function fetchGameDate(gameLink) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const response = yield axios_1.default.get(gameLink, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+                },
+            });
+            // Extract the date from the JSON-like response data
+            const dateMatch = response.data.match(/"dateModified":"([^"]+)"/);
+            const dateString = dateMatch ? dateMatch[1].trim() : null;
+            let formattedDate = null;
+            if (dateString) {
+                // Parse the date string to a Date object
+                const date = new Date(dateString);
+                // Format the date as "dd-mm-yyyy"
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are zero-based
+                const year = date.getFullYear();
+                formattedDate = `${day}-${month}-${year}`;
+            }
+            if (!formattedDate) {
+                console.error('Date not found on the page.');
+                return { date: null };
+            }
+            return { date: formattedDate };
+        }
+        catch (error) {
+            console.error(`Error fetching game date from ${gameLink}:`, error);
+            return { date: null };
+        }
     });
 }
 function searchGame(gameName, thread, client) {
@@ -79,6 +112,7 @@ function searchGame(gameName, thread, client) {
             }
             if (result.length > 0) {
                 const bestMatch = result[0].item;
+                const gameDate = yield fetchGameDate(bestMatch.link);
                 // Create embed with game details and buttons
                 const embed = new discord_js_1.EmbedBuilder()
                     .setTitle('Found a possible match!')
@@ -111,19 +145,18 @@ function searchGame(gameName, thread, client) {
                 // Function to refresh buttons
                 function refreshButtons() {
                     return __awaiter(this, void 0, void 0, function* () {
-                        const updatedEmbed = new discord_js_1.EmbedBuilder()
-                            .setTitle('Found a possible match!')
-                            .setColor('#0099ff');
-                        const refreshedMessage = yield sentMessage.edit({
-                            embeds: [updatedEmbed],
-                            components: [{
-                                    type: discord_js_1.ComponentType.ActionRow,
-                                    components: [dmButton, uploadButton, deleteButton]
-                                }]
-                        });
-                        sentMessage = refreshedMessage; // Update sentMessage reference
+                        //const refreshedMessage = await sentMessage.edit({
+                        //    components: [{
+                        //        type: ComponentType.ActionRow,
+                        //        components: [dmButton, uploadButton, deleteButton]
+                        //    }]
+                        //});
+                        //sentMessage = refreshedMessage; // Update sentMessage reference
                     });
                 }
+                // Set up periodic button refreshing
+                const refreshInterval = 300000; // Refresh every 5 minutes
+                const intervalId = setInterval(refreshButtons, refreshInterval);
                 // Create a collector for interactions with buttons
                 const collector = thread.createMessageComponentCollector({
                     componentType: discord_js_1.ComponentType.Button,
@@ -149,7 +182,7 @@ function searchGame(gameName, thread, client) {
                         const dmEmbed = new discord_js_1.EmbedBuilder()
                             .setColor('#00FF00')
                             .setTitle('Game Details')
-                            .setDescription(`Game Name: ${bestMatch.title}\nLink: ${bestMatch.link}`);
+                            .setDescription(`Game Name: ${bestMatch.title}\nLink: ${bestMatch.link}\nDate: ${gameDate.date}`);
                         // Respond to interaction with ephemeral message
                         yield interaction.followUp({ embeds: [dmEmbed], ephemeral: true });
                     }
@@ -157,7 +190,7 @@ function searchGame(gameName, thread, client) {
                         // Start the uploading process and update the message
                         const uploadEmbed = new discord_js_1.EmbedBuilder()
                             .setColor('#ffff00')
-                            .setTitle('Uploading...')
+                            .setTitle('Starting Upload...')
                             .setDescription('I need your help to Upload it. Please check your DMs...');
                         yield interaction.followUp({ embeds: [uploadEmbed], ephemeral: true });
                         // Update the original message to show the uploading status and remove buttons
@@ -219,15 +252,14 @@ function searchGame(gameName, thread, client) {
                         // Refresh buttons to keep them active
                         refreshButtons();
                     }
+                    clearInterval(intervalId); // Stop refreshing when collector ends
                 });
             }
             else {
-                yield thread.send(':x: No matching game found.');
             }
         }
         catch (error) {
             console.error('Error searching for game:', error);
-            yield thread.send(':x: An error occurred while searching.');
         }
     });
 }

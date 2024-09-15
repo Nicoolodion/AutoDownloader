@@ -32,9 +32,21 @@ export const client = new Client({
 
 
 const checkForNewThreads = async (thread: ThreadChannel) => {
-    // TODO Add tag selection and only choose games tag
-    if (thread.name.includes('MP') || thread.name.includes('Multiplayer')) {
+    const excludedTags = ['MP', 'Multiplayer', 'weitere Nachricht', 'DLC Unlocker', 'Unlocker'];
+    if (excludedTags.some(tag => thread.name.includes(tag))) {
         console.log('Multiplayer request detected, skipping...');
+        return;
+    }
+
+    const requiredTagId = process.env.GAMES_TAG;
+
+    if (!requiredTagId) {
+        console.error('REQUIRED_TAG_ID is not defined in the environment variables.');
+        return;
+    }
+
+    // Check if the thread has the required tag
+    if (!thread.appliedTags.includes(requiredTagId)) {
         return;
     }
 
@@ -42,8 +54,11 @@ const checkForNewThreads = async (thread: ThreadChannel) => {
     const existingThread = await db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
 
     if (!existingThread) {
-        await db.run('INSERT INTO request_thread (thread_name, thread_id) VALUES (?, ?)', thread.name, thread.id);
-        console.log(`Thread ${thread.name} has been saved.`);
+        const tags = thread.appliedTags;
+
+        
+
+        await db.run('INSERT INTO request_thread (thread_name, thread_id) VALUES (?, ?)', thread.name, thread.id);  
         await searchGame(thread.name, thread, client);
     }
 };
@@ -67,7 +82,6 @@ client.on('threadDelete', async (thread) => {
         `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id);
 
         await db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
-        console.log(`Thread ${thread.name} has been archived.`);
     }
 });
 

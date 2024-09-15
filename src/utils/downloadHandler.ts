@@ -1,5 +1,3 @@
-import { wrapper } from 'axios-cookiejar-support';
-import { CookieJar } from 'tough-cookie';
 import { config } from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -12,11 +10,9 @@ config(); // Load .env variables
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || './downloads';
 
 export async function downloadHandler(client: Client, gameLink: string, userId: string) {
-    const cookieJar = new CookieJar();
-    const axiosClient = wrapper(axios.create({ jar: cookieJar }));
     const downloadUrl = `${gameLink}#link_download`;
 
-    const response = await axiosClient.get(downloadUrl, {
+    const response = await axios.get(downloadUrl, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
         },
@@ -43,7 +39,7 @@ export async function downloadHandler(client: Client, gameLink: string, userId: 
         console.error('Google Drive link not found.');
         return;
     }
-
+    
     // Send DM to the user with the password and Google Drive link
     const user = await client.users.fetch(userId);
     if (user) {
