@@ -6,13 +6,20 @@ import dotenv from 'dotenv';
 import { setupDatabase } from '../db/setup';
 import { client } from '../bot';
 import { EmbedBuilder, TextChannel } from 'discord.js';
-
 dotenv.config();
+
+
 
 const WORKING_DOWNLOADS = 'C:\\Users\\niki1\\OneDrive - HTL Wels\\projects\\PirateBot\\download_working';
 const UPLOADING_DRIVE = process.env.UPLOADING_DRIVE || '';
 const CG_ADWARE = process.env.CG_ADWARE || '';
 const WINRAR_PATH = 'C:\\Program Files\\WinRAR\\WinRAR.exe'; // Set this to the full path of your WinRAR installation
+const Temp_DOWNLOAD_DIR = process.env.TEMP_DIR || './temp_downloads';
+const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || './downloads';
+
+//keep at false. starts the first download by moving the dlc file
+let processing = false;
+
 
 // Debounce settings
 const DEBOUNCE_DELAY = 10000; // 5 seconds delay to wait after the last change
@@ -23,7 +30,30 @@ const lastModificationTimes = new Map<string, number>();
 // Set to track processed directories
 const processedDirectories = new Set<string>();
 
-export function setupFileWatcher() {
+export async function processNextDlc() {
+    if (!processing) {
+        const files = await fs.readdir(Temp_DOWNLOAD_DIR);
+        const dlcFiles = files.filter((file) => file.endsWith('.dlc'));
+        if (dlcFiles.length === 0) {
+            return;
+        }
+        const dlcFile = dlcFiles[0];
+        const newFilePath = path.join(DOWNLOAD_DIR, dlcFile);
+        await fs.rename(path.join(Temp_DOWNLOAD_DIR, dlcFile), newFilePath);
+        processing = true;
+        console.log(`Moved .dlc file to ${DOWNLOAD_DIR}: ${dlcFile}`);
+
+        // Remove the moved file from the list to prevent it from being processed again
+        const index = dlcFiles.indexOf(dlcFile);
+        if (index > -1) {
+            dlcFiles.splice(index, 1);
+        }
+
+    }
+}
+
+
+export function setupFileWatcher(exportedThread: any) {
     const watcher = chokidar.watch(WORKING_DOWNLOADS, { persistent: true, ignoreInitial: true, depth: 1 });
 
     watcher.on('all', async (event, dirPath) => {
@@ -34,17 +64,18 @@ export function setupFileWatcher() {
             // Schedule processing after the debounce delay
             setTimeout(async () => {
                 if (lastModificationTimes.get(dirPath) === now) {
-                    await processDirectory(dirPath);
+
+                    await processDirectory(dirPath, exportedThread);
                 }
             }, DEBOUNCE_DELAY);
         }
     });
 }
 
-async function processDirectory(dirPath: string) {
+async function processDirectory(dirPath: string, exportedThread: any) {
     // Check if the directory has already been processed
     if (processedDirectories.has(dirPath)) {
-        console.log(`Directory ${dirPath} has already been processed.`);
+        //console.log(`Directory ${dirPath} has already been processed.`);
         return;
     }
 
@@ -55,7 +86,7 @@ async function processDirectory(dirPath: string) {
         try {
             await fs.access(dirPath);
         } catch {
-            console.log(`Directory ${dirPath} does not exist.`);
+            //console.log(`Directory ${dirPath} does not exist.`);
             return;
         }
 
@@ -70,12 +101,10 @@ async function processDirectory(dirPath: string) {
             return; // Skip empty directories
         }
 
-        console.log(files);
-
         const partFiles = files.filter(file => file.endsWith('.part'));
         if (partFiles.length > 0) {
             setTimeout(async () => {
-                await processDirectory(dirPath);
+                await processDirectory(dirPath, exportedThread);
             }, 30000);
             return;
         }
@@ -83,10 +112,12 @@ async function processDirectory(dirPath: string) {
         const partFiles2 = files.filter(file => file.endsWith('.rar'));
         if (partFiles2.length > 0) {
             setTimeout(async () => {
-                await processDirectory(dirPath);
+                await processDirectory(dirPath, exportedThread);
             }, 250000);
             return;
         }
+
+        
 
         const isoFiles = files.filter(file => file.endsWith('.iso'));
         if (isoFiles.length > 0) {
@@ -98,7 +129,10 @@ async function processDirectory(dirPath: string) {
 
                 await new Promise(resolve => setTimeout(resolve, 7000));
                 const db = await setupDatabase();
-                const row = await db.get('SELECT id FROM request_thread WHERE thread_id = (SELECT thread_id FROM request_thread ORDER BY id DESC LIMIT 1)');
+    
+                const row = await db.get('SELECT id FROM request_thread WHERE thread_id = ?', exportedThread.id);
+                console.log("exported: \n" + exportedThread.id)
+                console.log("rowID \n" +row.id)
                 if (row) {
                     await db.run('UPDATE request_thread SET rar_name = ? WHERE id = ?', folderName, row.id);
                 } else {
@@ -108,6 +142,9 @@ async function processDirectory(dirPath: string) {
             try {
                 await deleteDirectoryWithRetry(dirPath);
                 processedDirectories.add(dirPath);
+
+                processing = false;
+                processNextDlc()
 
                 const row = await db.get('SELECT * FROM request_thread WHERE rar_name = ?', folderName);
                 if (row) {
@@ -192,7 +229,9 @@ async function processDirectory(dirPath: string) {
             // TODO: PRODUCTION
             await new Promise(resolve => setTimeout(resolve, 7000));
             const db = await setupDatabase();
-            const row = await db.get('SELECT id FROM request_thread WHERE thread_id = (SELECT thread_id FROM request_thread ORDER BY id DESC LIMIT 1)');
+            const row = await db.get('SELECT id FROM request_thread WHERE thread_id = ?', exportedThread.id);
+            console.log("exported: \n" + exportedThread.id)
+            console.log("rowID \n" +row.id)
             if (row) {
                 await db.run('UPDATE request_thread SET rar_name = ? WHERE id = ?', folderName, row.id);
             } else {
@@ -210,7 +249,11 @@ async function processDirectory(dirPath: string) {
                     await deleteDirectoryWithRetry(dirPath);
                     processedDirectories.add(dirPath);
 
+                    processing = false;
+                    processNextDlc();
+
                     const row = await db.get('SELECT * FROM request_thread WHERE rar_name = ?', folderName);
+                    console.log("ROW: \n" +row)
                     if (row) {
                         const channel = await client.channels.fetch(row.thread_id);
                         if (channel && channel.isTextBased()) {
@@ -226,10 +269,11 @@ async function processDirectory(dirPath: string) {
                                     }
                                 }
 
-                                const row = await db.get('SELECT user_id FROM request_thread WHERE thread_id = ?', channel.id);
+                                const row = await db.get('SELECT user_id FROM request_thread WHERE thread_id = ?', exportedThread.id);
                                 if (row) {
                                     const user = await client.users.fetch(row.user_id);
                                     if (user) {
+                                        console.log("\n MESSAGE\n" + message)
                                         await message.edit({
                                             embeds: [new EmbedBuilder()
                                                 .setDescription(`${message.content}\n\n**Uploaded!**\n${user} your game has been uploaded and is now available for download.`)
@@ -268,7 +312,7 @@ async function processDirectory(dirPath: string) {
 async function deleteDirectoryWithRetry(dirPath: string) {
     for (let attempt = 0; attempt < 5; attempt++) {
         try {
-            await new Promise((resolve) => setTimeout(resolve, 60000));
+            await new Promise((resolve) => setTimeout(resolve, 20000));
             await fs.rm(dirPath, { recursive: true, force: true });
             console.log(`Directory deleted: ${dirPath}`);
             processedDirectories.delete(dirPath);

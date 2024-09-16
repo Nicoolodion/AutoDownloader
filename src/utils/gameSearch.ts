@@ -1,16 +1,19 @@
 import axios from 'axios';
-import { ThreadChannel, EmbedBuilder, ButtonBuilder, ButtonStyle, ComponentType, Client, DMChannel, GuildTextBasedChannel } from 'discord.js';
+import { ThreadChannel, EmbedBuilder, ButtonBuilder, ButtonStyle, ComponentType, Client, DMChannel, GuildTextBasedChannel, MessageFlags } from 'discord.js';
 import Fuse from 'fuse.js';
 import { checkPermissions } from './permissions';
 import { downloadHandler } from './downloadHandler'; // Adjust the path according to your project structure
 import { setupDatabase } from '../db/setup';
 import dotenv from 'dotenv';
+import { threadId } from 'worker_threads';
+import { setupFileWatcher } from './fileWatcher';
 
 dotenv.config();
 interface GameResult {
     title: string;
     link: string;
 }
+let exportedThread: ThreadChannel;
 
 
 
@@ -80,7 +83,6 @@ async function fetchGameDate(gameLink: string): Promise<{ date: string | null}> 
 
 export async function searchGame(gameName: string, thread: ThreadChannel, client: Client) {
     const searchUrl = `https://www.ovagames.com/?s=${encodeURIComponent(gameName)}&x=0&y=0`;
-
     try {
         const response = await axios.get(searchUrl, {
             headers: {
@@ -166,22 +168,10 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
             } catch (error) {
                 console.error('Error updating database:', error);
             }
-            
-            // Function to refresh buttons
-            async function refreshButtons() {
-                //const refreshedMessage = await sentMessage.edit({
-                //    components: [{
-                //        type: ComponentType.ActionRow,
-                //        components: [dmButton, uploadButton, deleteButton]
-                //    }]
-                //});
-                
-                //sentMessage = refreshedMessage; // Update sentMessage reference
-            }
 
             // Set up periodic button refreshing
             const refreshInterval = 300000; // Refresh every 5 minutes
-            const intervalId = setInterval(refreshButtons, refreshInterval);
+            const intervalId = setInterval(refreshButtonsIfNeeded, refreshInterval);
 
             // Create a collector for interactions with buttons
             const collector = thread.createMessageComponentCollector({
@@ -241,9 +231,10 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                         if (parentMessage) {
                             // Replace with your actual uploading emoji
                             await parentMessage.react('🔄');
-                        }   
-
-                        await downloadHandler(client, bestMatch.link, interaction.user.id);
+                        }
+                        console.log(thread.id);
+                        await downloadHandler(client, bestMatch.link, interaction.user.id, gameName, thread.id);
+                        setupFileWatcher(thread);
 
                 } else if (interaction.customId === 'delete_message') {
                     // Send a confirmation message with a button
@@ -261,23 +252,49 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                     };
                     const confirmMessage = await interaction.followUp({ embeds: [confirmEmbed], components: [row], ephemeral: true });
 
-                    // Collect button interactions
                     const confirmCollector = (interaction.channel as GuildTextBasedChannel | DMChannel).createMessageComponentCollector({
                         componentType: ComponentType.Button,
                         time: 10000,
                     });
-
+                    
                     confirmCollector.on('collect', async (i) => {
                         if (i.customId === 'confirm_delete') {
-                            // Delete the message
-                            await sentMessage.delete();
-                            const deleteEmbed = new EmbedBuilder()
-                                .setColor('#ff0000')
-                                .setTitle('Message Deleted')
-                                .setDescription('The message has been deleted.');
+                            const db = await setupDatabase();
+                            const messageIdRow = await db.get('SELECT message_id FROM request_thread WHERE thread_id = ?', thread.id);
                     
-                            // Send a follow-up message to the interaction
-                            await i.editReply({ embeds: [deleteEmbed], components: [] }); 
+                            if (messageIdRow) {
+                                const messageId = messageIdRow.message_id;
+                                let message;
+                    
+                                try {
+                                    message = await thread.messages.fetch(messageId);
+                                } catch (error) {
+                                    console.error('Error fetching the original message:', error);
+                                    return; // Exit if the message cannot be fetched
+                                }
+                    
+                                if (message) {
+                                    try {
+                                        await message.delete();
+                                    } catch (error) {
+                                        console.error('Error deleting the message:', error);
+                                        return; // Exit if the message cannot be deleted
+                                    }
+                                }
+                    
+                                try {
+                                    const confirmEmbed = new EmbedBuilder()
+                                        .setColor('#ff0000')
+                                        .setTitle('Confirmation')
+                                        .setDescription('The message has been deleted.');
+                                    
+                                    // Use the interaction to edit the ephemeral reply
+                                    await i.followUp({ embeds: [confirmEmbed], components: [], ephemeral: true });
+                                } catch (error) {
+                                    console.error('Error editing the confirmation message:', error);
+                                }
+                            }
+                    
                             confirmCollector.stop();
                         }
                     });
@@ -285,14 +302,44 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                 }
             });
 
-            collector.on('end', (collected, reason) => {
-                if (reason === 'time') {
-                    console.log('Collector timed out.');
-                    // Refresh buttons to keep them active
-                    refreshButtons();
-                }
-                clearInterval(intervalId); // Stop refreshing when collector ends
-            });
+            // Function to check if buttons exist and refresh them if necessary
+async function refreshButtonsIfNeeded() {
+    try {
+        // Fetch the current message to check its components
+        const currentMessage = await thread.messages.fetch(sentMessage.id);
+
+        // If there are no components (buttons), it means they were intentionally deleted
+        if (!currentMessage.components || currentMessage.components.length === 0) {
+            console.log('Buttons were removed intentionally. Skipping refresh.');
+            return;
+        }
+
+        // If buttons still exist, refresh them (you can update the components here if necessary)
+        await currentMessage.edit({
+            components: [{
+                type: ComponentType.ActionRow,
+                components: [dmButton, uploadButton, deleteButton] // re-add buttons if needed
+            }]
+        });
+
+    } catch (error) {
+        console.error('Error refreshing buttons:', error);
+    }
+}
+
+
+// Modify the 'end' event of the collector
+collector.on('end', async (collected, reason) => {
+    if (reason === 'time') {
+        console.log('Collector timed out.');
+        
+        // Call the new refresh function to check if buttons need to be refreshed
+        await refreshButtonsIfNeeded();
+    }
+    
+    clearInterval(intervalId); // Stop refreshing when collector ends
+});
+
 
         } else {
             
@@ -300,4 +347,6 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
     } catch (error) {
         console.error('Error searching for game:', error);
     }
+
+    
 }

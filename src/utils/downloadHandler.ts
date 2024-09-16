@@ -4,12 +4,14 @@ import fs from 'fs';
 import { setupDatabase } from '../db/setup';
 import axios from 'axios';
 import { Client, ChannelType, EmbedBuilder } from 'discord.js';
+import { threadId } from 'worker_threads';
+import { processNextDlc } from './fileWatcher';
 
 config(); // Load .env variables
 
-const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || './downloads';
+const Temp_DOWNLOAD_DIR = process.env.TEMP_DIR || './temp_downloads';
 
-export async function downloadHandler(client: Client, gameLink: string, userId: string) {
+export async function downloadHandler(client: Client, gameLink: string, userId: string, gameName: string, thread: any) {
     const downloadUrl = `${gameLink}#link_download`;
 
     const response = await axios.get(downloadUrl, {
@@ -26,7 +28,7 @@ export async function downloadHandler(client: Client, gameLink: string, userId: 
 
     // Save the password in the SQLite database
     const db = await setupDatabase();
-    const lastRow = await db.get('SELECT * FROM request_thread ORDER BY id DESC LIMIT 1');
+    const lastRow = await db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread);
     if (lastRow) {
         await db.run('UPDATE request_thread SET password = ? WHERE id = ?', password, lastRow.id);
     } else {
@@ -50,26 +52,35 @@ export async function downloadHandler(client: Client, gameLink: string, userId: 
             .setFooter({ text: 'Thanks for your contribution' })
             .setTimestamp();
         await user.send({ embeds: [embed] });
+        console.log("client" + client);
+        console.log("threadID" + thread);
+        console.log("gameLink" + gameName);
+        setupMessageListener(client, thread, gameName);
     }
 }
 
 // Global message listener for the bot to detect DM file uploads
-export function setupMessageListener(client: Client, gameName: string) {
+export function setupMessageListener(client: Client, threadId: string, gameName: string) {
+    const downloadedFiles = new Set<string>();
     client.on('messageCreate', async (message) => {
-        // Ensure it's a DM and the message has attachments
         if (message.channel.type === ChannelType.DM && message.attachments.size > 0) {
             const dlcAttachment = message.attachments.find((attachment) => attachment.name?.endsWith('.dlc'));
 
-            if (dlcAttachment) {
-                // Construct the new file name
+            if (dlcAttachment && dlcAttachment.size < 7 * 1024) {
                 const date = new Date();
                 const day = `0${date.getDate()}`.slice(-2);
                 const month = `0${date.getMonth() + 1}`.slice(-2);
                 const username = message.author.username;
                 const newFileName = `${gameName}_${username}_${day}_${month}.dlc`;
-                const filePath = path.join(DOWNLOAD_DIR, newFileName);
+                const filePath = path.join(Temp_DOWNLOAD_DIR, newFileName);
 
-                // Download the .dlc file to the DOWNLOAD_DIR
+                if (downloadedFiles.has(newFileName)) {
+                    console.log(`DLC file ${newFileName} has already been downloaded.`);
+                    return;
+                }
+
+                downloadedFiles.add(newFileName);
+
                 const writer = fs.createWriteStream(filePath);
                 const dlcResponse = await axios({
                     url: dlcAttachment.url,
@@ -78,15 +89,18 @@ export function setupMessageListener(client: Client, gameName: string) {
                 });
 
                 dlcResponse.data.pipe(writer);
-                
-                writer.on('finish', () => {
+
+                writer.on('finish', async () => {
+                    processNextDlc()
                     console.log('DLC file downloaded successfully.');
+
                     const embed = new EmbedBuilder()
                         .setColor(0x00ff00)
                         .setTitle('DLC File Uploaded')
                         .setDescription('The DLC file has been successfully uploaded and saved.')
                         .setFooter({ text: 'Thanks for your contribution' })
                         .setTimestamp();
+
                     message.author.send({ embeds: [embed] });
                 });
 
@@ -94,6 +108,8 @@ export function setupMessageListener(client: Client, gameName: string) {
                     console.error('Error downloading the DLC file:', error);
                     message.author.send('An error occurred while downloading the DLC file.');
                 });
+            } else if (dlcAttachment && dlcAttachment.size > 7 * 1024) {
+                message.author.send('The DLC file is larger than 7KB. Please report this issue to @nicoolodion. Although I am pretty sure that these files never go that large ;)')
             }
         }
     });

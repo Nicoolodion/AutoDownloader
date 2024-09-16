@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.processNextDlc = processNextDlc;
 exports.setupFileWatcher = setupFileWatcher;
 const chokidar_1 = __importDefault(require("chokidar"));
 const path_1 = __importDefault(require("path"));
@@ -26,13 +27,38 @@ const WORKING_DOWNLOADS = 'C:\\Users\\niki1\\OneDrive - HTL Wels\\projects\\Pira
 const UPLOADING_DRIVE = process.env.UPLOADING_DRIVE || '';
 const CG_ADWARE = process.env.CG_ADWARE || '';
 const WINRAR_PATH = 'C:\\Program Files\\WinRAR\\WinRAR.exe'; // Set this to the full path of your WinRAR installation
+const Temp_DOWNLOAD_DIR = process.env.TEMP_DIR || './temp_downloads';
+const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || './downloads';
+//keep at false. starts the first download by moving the dlc file
+let processing = false;
 // Debounce settings
 const DEBOUNCE_DELAY = 10000; // 5 seconds delay to wait after the last change
 // Map to track the last modification time for each directory
 const lastModificationTimes = new Map();
 // Set to track processed directories
 const processedDirectories = new Set();
-function setupFileWatcher() {
+function processNextDlc() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!processing) {
+            const files = yield promises_1.default.readdir(Temp_DOWNLOAD_DIR);
+            const dlcFiles = files.filter((file) => file.endsWith('.dlc'));
+            if (dlcFiles.length === 0) {
+                return;
+            }
+            const dlcFile = dlcFiles[0];
+            const newFilePath = path_1.default.join(DOWNLOAD_DIR, dlcFile);
+            yield promises_1.default.rename(path_1.default.join(Temp_DOWNLOAD_DIR, dlcFile), newFilePath);
+            processing = true;
+            console.log(`Moved .dlc file to ${DOWNLOAD_DIR}: ${dlcFile}`);
+            // Remove the moved file from the list to prevent it from being processed again
+            const index = dlcFiles.indexOf(dlcFile);
+            if (index > -1) {
+                dlcFiles.splice(index, 1);
+            }
+        }
+    });
+}
+function setupFileWatcher(exportedThread) {
     const watcher = chokidar_1.default.watch(WORKING_DOWNLOADS, { persistent: true, ignoreInitial: true, depth: 1 });
     watcher.on('all', (event, dirPath) => __awaiter(this, void 0, void 0, function* () {
         if (event === 'addDir' || event === 'unlinkDir') {
@@ -41,17 +67,17 @@ function setupFileWatcher() {
             // Schedule processing after the debounce delay
             setTimeout(() => __awaiter(this, void 0, void 0, function* () {
                 if (lastModificationTimes.get(dirPath) === now) {
-                    yield processDirectory(dirPath);
+                    yield processDirectory(dirPath, exportedThread);
                 }
             }), DEBOUNCE_DELAY);
         }
     }));
 }
-function processDirectory(dirPath) {
+function processDirectory(dirPath, exportedThread) {
     return __awaiter(this, void 0, void 0, function* () {
         // Check if the directory has already been processed
         if (processedDirectories.has(dirPath)) {
-            console.log(`Directory ${dirPath} has already been processed.`);
+            //console.log(`Directory ${dirPath} has already been processed.`);
             return;
         }
         try {
@@ -62,7 +88,7 @@ function processDirectory(dirPath) {
                 yield promises_1.default.access(dirPath);
             }
             catch (_a) {
-                console.log(`Directory ${dirPath} does not exist.`);
+                //console.log(`Directory ${dirPath} does not exist.`);
                 return;
             }
             const folderName = path_1.default.basename(dirPath);
@@ -74,18 +100,17 @@ function processDirectory(dirPath) {
                 console.log(`Directory ${dirPath} is empty. Skipping.`);
                 return; // Skip empty directories
             }
-            console.log(files);
             const partFiles = files.filter(file => file.endsWith('.part'));
             if (partFiles.length > 0) {
                 setTimeout(() => __awaiter(this, void 0, void 0, function* () {
-                    yield processDirectory(dirPath);
+                    yield processDirectory(dirPath, exportedThread);
                 }), 30000);
                 return;
             }
             const partFiles2 = files.filter(file => file.endsWith('.rar'));
             if (partFiles2.length > 0) {
                 setTimeout(() => __awaiter(this, void 0, void 0, function* () {
-                    yield processDirectory(dirPath);
+                    yield processDirectory(dirPath, exportedThread);
                 }), 250000);
                 return;
             }
@@ -98,7 +123,9 @@ function processDirectory(dirPath) {
                     yield promises_1.default.rename(newIsoPath, path_1.default.join(UPLOADING_DRIVE, `${folderName}.iso`));
                     yield new Promise(resolve => setTimeout(resolve, 7000));
                     const db = yield (0, setup_1.setupDatabase)();
-                    const row = yield db.get('SELECT id FROM request_thread WHERE thread_id = (SELECT thread_id FROM request_thread ORDER BY id DESC LIMIT 1)');
+                    const row = yield db.get('SELECT id FROM request_thread WHERE thread_id = ?', exportedThread.id);
+                    console.log("exported: \n" + exportedThread.id);
+                    console.log("rowID \n" + row.id);
                     if (row) {
                         yield db.run('UPDATE request_thread SET rar_name = ? WHERE id = ?', folderName, row.id);
                     }
@@ -108,6 +135,8 @@ function processDirectory(dirPath) {
                     try {
                         yield deleteDirectoryWithRetry(dirPath);
                         processedDirectories.add(dirPath);
+                        processing = false;
+                        processNextDlc();
                         const row = yield db.get('SELECT * FROM request_thread WHERE rar_name = ?', folderName);
                         if (row) {
                             const channel = yield bot_1.client.channels.fetch(row.thread_id);
@@ -187,7 +216,9 @@ function processDirectory(dirPath) {
                 // TODO: PRODUCTION
                 yield new Promise(resolve => setTimeout(resolve, 7000));
                 const db = yield (0, setup_1.setupDatabase)();
-                const row = yield db.get('SELECT id FROM request_thread WHERE thread_id = (SELECT thread_id FROM request_thread ORDER BY id DESC LIMIT 1)');
+                const row = yield db.get('SELECT id FROM request_thread WHERE thread_id = ?', exportedThread.id);
+                console.log("exported: \n" + exportedThread.id);
+                console.log("rowID \n" + row.id);
                 if (row) {
                     yield db.run('UPDATE request_thread SET rar_name = ? WHERE id = ?', folderName, row.id);
                 }
@@ -204,7 +235,10 @@ function processDirectory(dirPath) {
                     try {
                         yield deleteDirectoryWithRetry(dirPath);
                         processedDirectories.add(dirPath);
+                        processing = false;
+                        processNextDlc();
                         const row = yield db.get('SELECT * FROM request_thread WHERE rar_name = ?', folderName);
+                        console.log("ROW: \n" + row);
                         if (row) {
                             const channel = yield bot_1.client.channels.fetch(row.thread_id);
                             if (channel && channel.isTextBased()) {
@@ -219,10 +253,11 @@ function processDirectory(dirPath) {
                                             yield parentMessage.react('✅');
                                         }
                                     }
-                                    const row = yield db.get('SELECT user_id FROM request_thread WHERE thread_id = ?', channel.id);
+                                    const row = yield db.get('SELECT user_id FROM request_thread WHERE thread_id = ?', exportedThread.id);
                                     if (row) {
                                         const user = yield bot_1.client.users.fetch(row.user_id);
                                         if (user) {
+                                            console.log("\n MESSAGE\n" + message);
                                             yield message.edit({
                                                 embeds: [new discord_js_1.EmbedBuilder()
                                                         .setDescription(`${message.content}\n\n**Uploaded!**\n${user} your game has been uploaded and is now available for download.`)
@@ -265,7 +300,7 @@ function deleteDirectoryWithRetry(dirPath) {
     return __awaiter(this, void 0, void 0, function* () {
         for (let attempt = 0; attempt < 5; attempt++) {
             try {
-                yield new Promise((resolve) => setTimeout(resolve, 60000));
+                yield new Promise((resolve) => setTimeout(resolve, 20000));
                 yield promises_1.default.rm(dirPath, { recursive: true, force: true });
                 console.log(`Directory deleted: ${dirPath}`);
                 processedDirectories.delete(dirPath);

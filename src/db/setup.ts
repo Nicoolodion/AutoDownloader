@@ -17,7 +17,7 @@ export async function setupDatabase() {
             rar_name TEXT,
             message_id TEXT,
             user_id TEXT
-
+            folder_path TEXT
         )
     `);
 
@@ -31,6 +31,7 @@ export async function setupDatabase() {
             message_id TEXT,
             rar_name TEXT,
             user_id TEXT,
+            folder_path TEXT,
             deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `);
