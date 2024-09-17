@@ -2,16 +2,14 @@ import { ButtonBuilder, ButtonStyle, Client, ComponentType, GatewayIntentBits, P
 import dotenv from 'dotenv';
 import { setupDatabase } from './db/setup';
 import { searchGame } from './utils/gameSearch';
-import { setupMessageListener } from './utils/downloadHandler';
-import { setupFileWatcher } from './utils/fileWatcher'; // Import the file watcher
 import { threadId } from 'worker_threads';
 
 //TODO: Add Folder System back in. Make sure it searches if a folder already exists.
 //TODO: Try a different approach not using Jdownloader... Priority low
 //TODO: Make The Buttons not time out
 //TODO: Optimize
-//TODO: Make sure git doesn't upload any files
 //TODO: Got Problems, type Help over DM. Explain what things to use for redirects.
+//TODO: Prevent Spamming of Buttons
 
 
 
@@ -38,6 +36,7 @@ export const client = new Client({
         const gameName = lastRow ? lastRow.thread_name : '';
     }
 
+    
 });
 
 
@@ -86,9 +85,9 @@ client.on('threadDelete', async (thread) => {
     if (threadData) {
         await db.run(`
             INSERT INTO archived_thread (
-                thread_name, thread_id, link, password, message_id, rar_name, user_id, folder_path, uploader_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id, threadData.rar_name, threadData.user_id, threadData.folder_path, threadData.uploader_id);
+                thread_name, thread_id, link, password, message_id, rar_name, user_id, folder_path, uploader_id, buttons_inactive
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id, threadData.rar_name, threadData.user_id, threadData.folder_path, threadData.uploader_id, threadData.buttons_inactive);
 
         await db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
     }
@@ -97,4 +96,3 @@ client.on('threadDelete', async (thread) => {
 
 
 client.login(process.env.DISCORD_TOKEN);
-

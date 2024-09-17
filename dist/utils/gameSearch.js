@@ -162,6 +162,31 @@ function searchGame(gameName, thread, client) {
                         return;
                     // Defer the update if needed to avoid interaction timeout
                     yield interaction.deferUpdate();
+                    // Inside the message collector setup
+                    collector.on('end', () => __awaiter(this, void 0, void 0, function* () {
+                        const db = yield (0, setup_1.setupDatabase)();
+                        const existingRow = yield db.get('SELECT buttons_inactive FROM request_thread WHERE thread_id = ?', thread.id);
+                        if (existingRow && existingRow.buttons_inactive !== 1) {
+                            const dmButton = new discord_js_1.ButtonBuilder()
+                                .setCustomId('send_dm')
+                                .setLabel('Send Details')
+                                .setStyle(discord_js_1.ButtonStyle.Primary);
+                            const uploadButton = new discord_js_1.ButtonBuilder()
+                                .setCustomId('start_upload')
+                                .setLabel('Start Upload')
+                                .setStyle(discord_js_1.ButtonStyle.Success);
+                            const deleteButton = new discord_js_1.ButtonBuilder()
+                                .setCustomId('delete_message')
+                                .setLabel('Delete Message')
+                                .setStyle(discord_js_1.ButtonStyle.Danger);
+                            yield sentMessage.edit({
+                                components: [{
+                                        type: discord_js_1.ComponentType.ActionRow,
+                                        components: [dmButton, uploadButton, deleteButton]
+                                    }]
+                            });
+                        }
+                    }));
                     const userRoles = (_a = interaction.member) === null || _a === void 0 ? void 0 : _a.roles;
                     const { adminUserId } = require('../data/permissions.json');
                     if ((!(0, permissions_1.checkPermissions)(userRoles, (_b = process.env.admin) !== null && _b !== void 0 ? _b : '') && !(0, permissions_1.checkPermissions)(userRoles, (_c = process.env.uploader) !== null && _c !== void 0 ? _c : '') && interaction.user.id !== adminUserId)) {
@@ -206,10 +231,10 @@ function searchGame(gameName, thread, client) {
                         const db = yield (0, setup_1.setupDatabase)();
                         const existingRow = yield db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
                         if (existingRow) {
-                            yield db.run('UPDATE request_thread SET uploader_id = ? WHERE id = ?', interaction.user.id, existingRow.id);
+                            yield db.run('UPDATE request_thread SET uploader_id = ?, buttons_inactive = 1 WHERE id = ?', interaction.user.id, existingRow.id);
                         }
                         else {
-                            yield db.run('INSERT INTO request_thread (thread_name, thread_id, uploader_id) VALUES (?, ?, ?)', thread.name, thread.id, interaction.user.id);
+                            yield db.run('INSERT INTO request_thread (thread_name, thread_id, uploader_id, buttons_inactive) VALUES (?, ?, ?, 1)', thread.name, thread.id, interaction.user.id);
                         }
                         yield (0, downloadHandler_1.downloadHandler)(client, bestMatch.link, interaction.user.id, gameName, thread.id);
                         (0, fileWatcher_1.setupFileWatcher)(thread);

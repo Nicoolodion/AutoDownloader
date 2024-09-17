@@ -183,6 +183,37 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                 // Defer the update if needed to avoid interaction timeout
                 await interaction.deferUpdate();
 
+                // Inside the message collector setup
+collector.on('end', async () => {
+    const db = await setupDatabase();
+    const existingRow = await db.get('SELECT buttons_inactive FROM request_thread WHERE thread_id = ?', thread.id);
+
+    if (existingRow && existingRow.buttons_inactive !== 1) {
+        const dmButton = new ButtonBuilder()
+            .setCustomId('send_dm')
+            .setLabel('Send Details')
+            .setStyle(ButtonStyle.Primary);
+
+        const uploadButton = new ButtonBuilder()
+            .setCustomId('start_upload')
+            .setLabel('Start Upload')
+            .setStyle(ButtonStyle.Success);
+
+        const deleteButton = new ButtonBuilder()
+            .setCustomId('delete_message')
+            .setLabel('Delete Message')
+            .setStyle(ButtonStyle.Danger);
+
+        await sentMessage.edit({
+            components: [{
+                type: ComponentType.ActionRow,
+                components: [dmButton, uploadButton, deleteButton]
+            }]
+        });
+    }
+});
+
+
                 const userRoles = interaction.member?.roles as any;
                 const { adminUserId } = require('../data/permissions.json');
         
@@ -233,9 +264,9 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                         const db = await setupDatabase();
                         const existingRow = await db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
                         if (existingRow) {
-                            await db.run('UPDATE request_thread SET uploader_id = ? WHERE id = ?', interaction.user.id, existingRow.id);
+                            await db.run('UPDATE request_thread SET uploader_id = ?, buttons_inactive = 1 WHERE id = ?', interaction.user.id, existingRow.id);
                         } else {
-                            await db.run('INSERT INTO request_thread (thread_name, thread_id, uploader_id) VALUES (?, ?, ?)', thread.name, thread.id, interaction.user.id);
+                            await db.run('INSERT INTO request_thread (thread_name, thread_id, uploader_id, buttons_inactive) VALUES (?, ?, ?, 1)', thread.name, thread.id, interaction.user.id);
                         }
                         await downloadHandler(client, bestMatch.link, interaction.user.id, gameName, thread.id);
                         setupFileWatcher(thread);

@@ -31,8 +31,9 @@ function setupDatabase() {
             rar_name TEXT,
             message_id TEXT,
             user_id TEXT,
+            folder_path TEXT,
             uploader_id TEXT,
-            folder_path TEXT
+            buttons_inactive TEXT
         )
     `);
         yield db.exec(`
@@ -47,6 +48,7 @@ function setupDatabase() {
             user_id TEXT,
             folder_path TEXT,
             uploader_id TEXT,
+            buttons_inactive TEXT,
             deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `);
