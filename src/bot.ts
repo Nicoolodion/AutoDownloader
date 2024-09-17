@@ -8,10 +8,10 @@ import { threadId } from 'worker_threads';
 
 //TODO: Add Folder System back in. Make sure it searches if a folder already exists.
 //TODO: Try a different approach not using Jdownloader... Priority low
-//TODO: Save who approved it -- Do this in school?
 //TODO: Make The Buttons not time out
 //TODO: Optimize
 //TODO: Make sure git doesn't upload any files
+//TODO: Got Problems, type Help over DM. Explain what things to use for redirects.
 
 
 
@@ -33,7 +33,6 @@ export const client = new Client({
     const db = await setupDatabase();
     // TODO Make sure it actually works since it is just undefined at start?
     const lastRow = await db.get('SELECT thread_name FROM request_thread WHERE thread_id = ?', threadId);
-    refreshButtonsOnStartup(client);
 
     if (lastRow) {
         const gameName = lastRow ? lastRow.thread_name : '';
@@ -87,60 +86,15 @@ client.on('threadDelete', async (thread) => {
     if (threadData) {
         await db.run(`
             INSERT INTO archived_thread (
-                thread_name, thread_id, link, password, message_id, rar_name, user_id, folder_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id, threadData.rar_name, threadData.user_id, threadData.folder_path);
+                thread_name, thread_id, link, password, message_id, rar_name, user_id, folder_path, uploader_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, threadData.thread_name, threadData.thread_id, threadData.link, threadData.password, threadData.message_id, threadData.rar_name, threadData.user_id, threadData.folder_path, threadData.uploader_id);
 
         await db.run('DELETE FROM request_thread WHERE thread_id = ?', thread.id);
     }
+
 });
 
-async function refreshButtonsOnStartup(client: Client) {
-    const db = await setupDatabase();
-    const threadsWithMessages = await db.all('SELECT thread_id, message_id FROM request_thread WHERE message_id IS NOT NULL');
-
-    for (const { thread_id, message_id } of threadsWithMessages) {
-        try {
-            const thread = await client.channels.fetch(thread_id) as ThreadChannel;
-            const message = await thread.messages.fetch(message_id);
-            console.log("threadids:" + thread.id)
-            console.log("messageids:" + message.id)
-            
-            // Reattach collectors for existing messages with buttons
-            await refreshButtonsForMessage(thread, message);
-        } catch (error) {
-            console.error(`Error refreshing buttons for thread ${thread_id}, message ${message_id}:`, error);
-        }
-    }
-}
-
-async function refreshButtonsForMessage(thread: ThreadChannel, sentMessage: any) {
-    // Recreate and set up button collectors for existing messages
-    console.log("refreshing Buttons");
-    const dmButton = new ButtonBuilder()
-        .setCustomId('send_dm')
-        .setLabel('Send Details')
-        .setStyle(ButtonStyle.Primary);
-
-    const uploadButton = new ButtonBuilder()
-        .setCustomId('start_upload')
-        .setLabel('Start Upload')
-        .setStyle(ButtonStyle.Success);
-
-    const deleteButton = new ButtonBuilder()
-        .setCustomId('delete_message')
-        .setLabel('Delete Message')
-        .setStyle(ButtonStyle.Danger);
-
-    await sentMessage.edit({
-        components: [{
-            type: ComponentType.ActionRow,
-            components: [dmButton, uploadButton, deleteButton]
-        }]
-    });
-    console.log("refreshed messages");
-}
-// TODO: Continue where I stopped!!!!
 
 client.login(process.env.DISCORD_TOKEN);
 

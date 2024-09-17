@@ -1,2 +1,15 @@
 *.env
 node_modules/
+
+CG_ADWARE/*
+!CG_ADWARE/.gitkeep
+download_working/*
+!download_working/.gitkeep
+CG_ADWARE/*
+!CG_ADWARE/.gitkeep
+downloads/added/*
+!downloads/added/.gitkeep
+drive_emulator/*
+!drive_emulator/.gitkeep
+temp_downloads/*
+!temp_downloads/gitkeep

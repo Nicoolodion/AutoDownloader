@@ -1,3 +1,4 @@
+
 import axios from 'axios';
 import { ThreadChannel, EmbedBuilder, ButtonBuilder, ButtonStyle, ComponentType, Client, DMChannel, GuildTextBasedChannel, MessageFlags } from 'discord.js';
 import Fuse from 'fuse.js';
@@ -169,9 +170,6 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                 console.error('Error updating database:', error);
             }
 
-            // Set up periodic button refreshing
-            const refreshInterval = 300000; // Refresh every 5 minutes
-            const intervalId = setInterval(refreshButtonsIfNeeded, refreshInterval);
 
             // Create a collector for interactions with buttons
             const collector = thread.createMessageComponentCollector({
@@ -232,7 +230,13 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                             // Replace with your actual uploading emoji
                             await parentMessage.react('🔄');
                         }
-                        console.log(thread.id);
+                        const db = await setupDatabase();
+                        const existingRow = await db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
+                        if (existingRow) {
+                            await db.run('UPDATE request_thread SET uploader_id = ? WHERE id = ?', interaction.user.id, existingRow.id);
+                        } else {
+                            await db.run('INSERT INTO request_thread (thread_name, thread_id, uploader_id) VALUES (?, ?, ?)', thread.name, thread.id, interaction.user.id);
+                        }
                         await downloadHandler(client, bestMatch.link, interaction.user.id, gameName, thread.id);
                         setupFileWatcher(thread);
 
@@ -289,7 +293,7 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                                         .setDescription('The message has been deleted.');
                                     
                                     // Use the interaction to edit the ephemeral reply
-                                    await i.followUp({ embeds: [confirmEmbed], components: [], ephemeral: true });
+                                    await i.editReply({ embeds: [confirmEmbed], components: []});
                                 } catch (error) {
                                     console.error('Error editing the confirmation message:', error);
                                 }
@@ -302,47 +306,6 @@ export async function searchGame(gameName: string, thread: ThreadChannel, client
                 }
             });
 
-            // Function to check if buttons exist and refresh them if necessary
-async function refreshButtonsIfNeeded() {
-    try {
-        // Fetch the current message to check its components
-        const currentMessage = await thread.messages.fetch(sentMessage.id);
-
-        // If there are no components (buttons), it means they were intentionally deleted
-        if (!currentMessage.components || currentMessage.components.length === 0) {
-            console.log('Buttons were removed intentionally. Skipping refresh.');
-            return;
-        }
-
-        // If buttons still exist, refresh them (you can update the components here if necessary)
-        await currentMessage.edit({
-            components: [{
-                type: ComponentType.ActionRow,
-                components: [dmButton, uploadButton, deleteButton] // re-add buttons if needed
-            }]
-        });
-
-    } catch (error) {
-        console.error('Error refreshing buttons:', error);
-    }
-}
-
-
-// Modify the 'end' event of the collector
-collector.on('end', async (collected, reason) => {
-    if (reason === 'time') {
-        console.log('Collector timed out.');
-        
-        // Call the new refresh function to check if buttons need to be refreshed
-        await refreshButtonsIfNeeded();
-    }
-    
-    clearInterval(intervalId); // Stop refreshing when collector ends
-});
-
-
-        } else {
-            
         }
     } catch (error) {
         console.error('Error searching for game:', error);

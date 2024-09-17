@@ -30,7 +30,8 @@ function setupDatabase() {
             password TEXT CHECK(LENGTH(password) = 3),
             rar_name TEXT,
             message_id TEXT,
-            user_id TEXT
+            user_id TEXT,
+            uploader_id TEXT,
             folder_path TEXT
         )
     `);
@@ -45,6 +46,7 @@ function setupDatabase() {
             rar_name TEXT,
             user_id TEXT,
             folder_path TEXT,
+            uploader_id TEXT,
             deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `);

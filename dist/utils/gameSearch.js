@@ -151,9 +151,6 @@ function searchGame(gameName, thread, client) {
                 catch (error) {
                     console.error('Error updating database:', error);
                 }
-                // Set up periodic button refreshing
-                const refreshInterval = 300000; // Refresh every 5 minutes
-                const intervalId = setInterval(refreshButtonsIfNeeded, refreshInterval);
                 // Create a collector for interactions with buttons
                 const collector = thread.createMessageComponentCollector({
                     componentType: discord_js_1.ComponentType.Button,
@@ -206,7 +203,14 @@ function searchGame(gameName, thread, client) {
                             // Replace with your actual uploading emoji
                             yield parentMessage.react('🔄');
                         }
-                        console.log(thread.id);
+                        const db = yield (0, setup_1.setupDatabase)();
+                        const existingRow = yield db.get('SELECT * FROM request_thread WHERE thread_id = ?', thread.id);
+                        if (existingRow) {
+                            yield db.run('UPDATE request_thread SET uploader_id = ? WHERE id = ?', interaction.user.id, existingRow.id);
+                        }
+                        else {
+                            yield db.run('INSERT INTO request_thread (thread_name, thread_id, uploader_id) VALUES (?, ?, ?)', thread.name, thread.id, interaction.user.id);
+                        }
                         yield (0, downloadHandler_1.downloadHandler)(client, bestMatch.link, interaction.user.id, gameName, thread.id);
                         (0, fileWatcher_1.setupFileWatcher)(thread);
                     }
@@ -258,7 +262,7 @@ function searchGame(gameName, thread, client) {
                                             .setTitle('Confirmation')
                                             .setDescription('The message has been deleted.');
                                         // Use the interaction to edit the ephemeral reply
-                                        yield i.followUp({ embeds: [confirmEmbed], components: [], ephemeral: true });
+                                        yield i.editReply({ embeds: [confirmEmbed], components: [] });
                                     }
                                     catch (error) {
                                         console.error('Error editing the confirmation message:', error);
@@ -269,41 +273,6 @@ function searchGame(gameName, thread, client) {
                         }));
                     }
                 }));
-                // Function to check if buttons exist and refresh them if necessary
-                function refreshButtonsIfNeeded() {
-                    return __awaiter(this, void 0, void 0, function* () {
-                        try {
-                            // Fetch the current message to check its components
-                            const currentMessage = yield thread.messages.fetch(sentMessage.id);
-                            // If there are no components (buttons), it means they were intentionally deleted
-                            if (!currentMessage.components || currentMessage.components.length === 0) {
-                                console.log('Buttons were removed intentionally. Skipping refresh.');
-                                return;
-                            }
-                            // If buttons still exist, refresh them (you can update the components here if necessary)
-                            yield currentMessage.edit({
-                                components: [{
-                                        type: discord_js_1.ComponentType.ActionRow,
-                                        components: [dmButton, uploadButton, deleteButton] // re-add buttons if needed
-                                    }]
-                            });
-                        }
-                        catch (error) {
-                            console.error('Error refreshing buttons:', error);
-                        }
-                    });
-                }
-                // Modify the 'end' event of the collector
-                collector.on('end', (collected, reason) => __awaiter(this, void 0, void 0, function* () {
-                    if (reason === 'time') {
-                        console.log('Collector timed out.');
-                        // Call the new refresh function to check if buttons need to be refreshed
-                        yield refreshButtonsIfNeeded();
-                    }
-                    clearInterval(intervalId); // Stop refreshing when collector ends
-                }));
-            }
-            else {
             }
         }
         catch (error) {
